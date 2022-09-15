@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC</title>
+</head>
+
+<body>
+    <h1>WEBRTC TEST</h1>
+    <p>
+        <input type="radio" name="media" id="chkbox00" value="0" checked />
+        <label for="chkbox00">CAMERA</label>
+        <input type="radio" name="media" id="chkbox01" value="0" />
+        <label for="chkbox01">SCREEN</label>
+        <input type="radio" name="media" id="chkbox02" value="0" />
+        <label for="chkbox02">NONE</label>
+    </p>
+    <p>
+        <button id="btn00">MEDIA-ON</button>
+        <button id="btn01">MEDIA-OFF</button>
+
+    </p>
+    <p>
+        <label for="text00">SERVER:</label><br>
+        <input type="text" id="text00" maxlength="25" size="25" value="localhost:8080">
+    </p>
+    <p>
+        <button id="btn10">WS-START</button>
+        <button id="btn11">WS-CLOSE</button>
+    </p>
+    <p>
+        <button id="btn20">WEBRTC-CALL</button>
+        <button id="btn21">WEBRTC-HANGUP</button>
+    </p>
+    <p>
+        <video id="localVideo" autoplay playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </p>
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        const cameraCheckbox = document.getElementById("chkbox00")
+        const screenCheckbox = document.getElementById("chkbox01")
+        const disableCheckbox = document.getElementById("chkbox02")
+        const mediaOnButton = document.getElementById("btn00")
+        const mediaOffButton = document.getElementById("btn01")
+
+        const serverHostname = document.getElementById("text00")
+        const wssStartButton = document.getElementById("btn10")
+        const wssCloseButton = document.getElementById("btn11")
+
+        const rtcCallButton = document.getElementById("btn20")
+        const rtcHangupButton = document.getElementById("btn21")
+
+        cameraCheckbox.disabled = false;
+        screenCheckbox.disabled = false;
+        disableCheckbox.disabled = false;
+        mediaOnButton.disabled = false;
+        mediaOffButton.disabled = true;
+        disableCheckbox.disabled = false;
+        serverHostname.disabled = true;
+        wssStartButton.disabled = true;
+        wssCloseButton.disabled = true;
+        rtcCallButton.disabled = true;
+        rtcHangupButton.disabled = true;
+
+        mediaOnButton.addEventListener('click', mediaOn)
+        mediaOffButton.addEventListener('click', mediaOff)
+
+        wssStartButton.addEventListener('click', wssStart)
+        wssCloseButton.addEventListener('click', wssClose)
+
+        rtcCallButton.addEventListener('click', rtcCall)
+        rtcHangupButton.addEventListener('click', rtcHangup)
+
+        let webSocket;
+        let localStream;
+        let pc;
+
+        function setState(state) {
+            switch (state) {
+                case 0: //default
+                    cameraCheckbox.disabled = false;
+                    screenCheckbox.disabled = false;
+                    disableCheckbox.disabled = false;
+                    mediaOnButton.disabled = false;
+                    mediaOffButton.disabled = true;
+                    serverHostname.disabled = true;
+                    wssStartButton.disabled = true;
+                    wssCloseButton.disabled = true;
+                    rtcCallButton.disabled = true;
+                    rtcHangupButton.disabled = true;
+                    break;
+                case 1: //media on
+                    cameraCheckbox.disabled = true;
+                    screenCheckbox.disabled = true;
+                    disableCheckbox.disabled = true;
+                    mediaOnButton.disabled = true;
+                    mediaOffButton.disabled = false;
+                    serverHostname.disabled = false;
+                    wssStartButton.disabled = false;
+                    wssCloseButton.disabled = true;
+                    rtcCallButton.disabled = true;
+                    rtcHangupButton.disabled = true;
+                    break;
+                case 2: // wss start
+                    cameraCheckbox.disabled = true;
+                    screenCheckbox.disabled = true;
+                    disableCheckbox.disabled = true;
+                    mediaOnButton.disabled = true;
+                    mediaOffButton.disabled = true;
+                    serverHostname.disabled = true;
+                    wssStartButton.disabled = true;
+                    wssCloseButton.disabled = false;
+                    rtcCallButton.disabled = false;
+                    rtcHangupButton.disabled = true;
+                    break;
+                case 3: // webrtc connected
+                    cameraCheckbox.disabled = true;
+                    screenCheckbox.disabled = true;
+                    disableCheckbox.disabled = true;
+                    mediaOnButton.disabled = true;
+                    mediaOffButton.disabled = true;
+                    serverHostname.disabled = true;
+                    wssStartButton.disabled = true;
+                    wssCloseButton.disabled = true;
+                    rtcCallButton.disabled = true;
+                    rtcHangupButton.disabled = false;
+                    break;
+            }
+        }
+        async function mediaOn() {
+            try {
+                if (disableCheckbox.checked == true) {
+                    localVideo.style.display = "none";
+                    console.log("LOCAL: media stream will not be used");
+                    setState(1);
+                    return;
+                }
+                const mediaStreamConstraints = {
+                    video: { 'width': 320, 'height': 240 },
+                    audio: true,
+                };
+                let stream;
+
+                if (cameraCheckbox.checked == true)
+                    stream = await navigator.mediaDevices.getUserMedia(mediaStreamConstraints);
+                else
+                    stream = await navigator.mediaDevices.getDisplayMedia(mediaStreamConstraints);
+
+                localVideo.srcObject = stream;
+                localStream = stream;
+                setState(1);
+                console.log("LOCAL: Get media stream")
+            } catch (e) {
+                alert(`getUserMedia() error: ${e.name}`);
+            }
+        }
+        async function mediaOff() {
+
+            if (disableCheckbox.checked == false)
+                localStream.getTracks().forEach(function (track) { track.stop(); });
+
+            localVideo.srcObject = null;
+            setState(0);
+            console.log("LOCAL: Release media stream")
+        }
+
+        async function wssStart() {
+            webSocket = new WebSocket("wss://" + serverHostname.value);
+            // webSocket = new WebSocket("wss://localhost:8080");
+
+            webSocket.addEventListener('open', () => {
+                setState(2)
+                console.log("LOCAL: Connected wss to server")
+            })
+            webSocket.addEventListener('message', signaling)
+        }
+        async function wssClose() {
+            console.log("LOCAL: Disonnected wss from server")
+            webSocket.close();
+            setState(1)
+        }
+
+        function signaling(e) {
+            const evt = JSON.parse(e.data)
+            // if (!localStream) {
+            //     console.log('not ready yet');
+            //     return;
+            // }
+            console.log('REMOTE : RECEIVE SIG ' + evt.type)
+
+            switch (evt.type) {
+                case 'offer':
+                    handleOffer(evt);
+                    break;
+                case 'answer':
+                    handleAnswer(evt);
+                    break;
+                case 'candidate':
+                    handleCandidate(evt);
+                    break;
+                case 'hangup':
+                    if (pc) rtcHangup();
+                    break;
+                default:
+                    console.log('unhandled', evt);
+                    break;
+            }
+        }
+
+        async function onIceCandidate(evt) {
+            if (evt.candidate) {
+                const msg = {
+                    type: "candidate",
+                    candidate: evt.candidate
+                }
+                if (evt.candidate) {
+                    msg.candidate = evt.candidate.candidate;
+                    msg.sdpMid = evt.candidate.sdpMid;
+                    msg.sdpMLineIndex = evt.candidate.sdpMLineIndex;
+                }
+                await webSocket.send(JSON.stringify(msg));
+            } else {
+                // console.log("End of candidates.");
+            }
+        }
+
+        async function onRemoteStreamAdded(evt) {
+            console.log("LOCAL: Add remote video stream from received SDP")
+            console.log(evt.stream)
+
+            remoteVideo.srcObject = evt.stream;
+        }
+
+        async function onRemoteStreamRemoved(evt) {
+            console.log("LOCAL: Remove remote video stream")
+            remoteVideo.srcObject = "";
+        }
+
+        //make offer
+        async function rtcCall() {
+            const pcConfig = {
+                'iceServers': [
+                    // {"urls":["turn:IP:3478?transport=tcp"],"username":"username","credential":"passwd"}
+                ]
+            };
+
+            pc = new RTCPeerConnection(pcConfig);
+
+            // pc.addStream(localStream); // old way
+            if (disableCheckbox.checked == true) {
+                pc.addTransceiver('video');
+                pc.getTransceivers().forEach(t => t.direction = 'recvonly');
+            }
+            else {
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                pc.addTransceiver('video');
+            }
+
+            pc.addEventListener("icecandidate", onIceCandidate);
+            pc.addEventListener("addstream", onRemoteStreamAdded, false);
+            pc.addEventListener("removestream", onRemoteStreamRemoved, false)
+
+            const offer = await pc.createOffer()
+
+            const msg = {
+                type: "offer",
+                sdp: offer.sdp
+            }
+            await webSocket.send(JSON.stringify(msg));
+            pc.setLocalDescription(offer);
+            console.log("LOCAL: Make offer (Caller)")
+            console.log("       New RTCPeerConnection")
+            console.log("       Add local media stream")
+            console.log("       New offer SDP")
+            console.log("       Send offer SDP via WSS")
+            console.log("       Set local description with offer SDP")
+        }
+
+        // answer
+        async function handleOffer(offer) {
+            const pcConfig = {
+                'iceServers': [
+                    // {"urls":["turn:IP:3478?transport=tcp"],"username":"username","credential":"passwd"}
+                ]
+            };
+
+            pc = new RTCPeerConnection(pcConfig);
+
+            // pc.addStream(localStream); // old way
+            if (disableCheckbox.checked == true) {
+                pc.addTransceiver('video');
+                pc.getTransceivers().forEach(t => t.direction = 'recvonly');
+            }
+            else {
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                pc.addTransceiver('video');
+            }
+
+            pc.addEventListener("icecandidate", onIceCandidate);
+            pc.addEventListener("addstream", onRemoteStreamAdded, false);
+            pc.addEventListener("removestream", onRemoteStreamRemoved, false)
+
+            await pc.setRemoteDescription(offer);
+
+            const answer = await pc.createAnswer();
+
+            const msg = {
+                type: "answer",
+                sdp: answer.sdp
+            }
+            await webSocket.send(JSON.stringify(msg));
+            await pc.setLocalDescription(answer);
+            setState(3);
+            console.log("LOCAL: Make answer (Callee)")
+            console.log("       New RTCPeerConnection")
+            console.log("       Add local media stream")
+            console.log("       Set remote description with received offer SDP")
+            console.log("       New answer SDP")
+            console.log("       Send answer SDP via WSS")
+            console.log("       Set local description with answer ADP")
+
+
+        }
+
+        async function handleAnswer(answer) {
+            await pc.setRemoteDescription(answer);
+            setState(3);
+            console.log("LOCAL: Set remote description with received answer SDP")
+        }
+
+        async function handleCandidate(candidate) {
+            if (!candidate.candidate) {
+                await pc.addIceCandidate(null);
+            } else {
+                await pc.addIceCandidate(candidate);
+                console.log("LOCAL: Add received ICECandidate")
+            }
+        }
+
+        async function rtcHangup() {
+            pc.close();
+            pc = null;
+            remoteVideo.src = null;
+            const msg = {
+                type: "hangup"
+            }
+            await webSocket.send(JSON.stringify(msg));
+            setState(2)
+
+        }
+
+    </script>
+</body>
